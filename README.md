@@ -38,6 +38,12 @@ The task is episodic, and in order to solve the environment, your agent must get
 
 Follow the instructions in `Navigation.ipynb` to get started with training your own agent!  
 
+### How to run correctly
+
+If run python files locally, need to enter env with `source activate drlnd`
+
+If run python notebook, need to setup the env with `python -m ipykernel install --user --name drlnd --display-name "drlnd"`
+
 ### (Optional) Challenge: Learning from Pixels
 
 After you have successfully completed the project, if you're looking for an additional challenge, you have come to the right place!  In the project, your agent learned from information such as its velocity, along with ray-based perception of objects around its forward direction.  A more challenging task would be to learn directly from pixels!
