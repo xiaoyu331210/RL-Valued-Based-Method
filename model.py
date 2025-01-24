@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+HIDDEN_LAYER_1 = 64
+HIDDEN_LAYER_2 = 64
 # A deep Q network with discrete input state
 class DiscreteStateDQN(nn.Module):
     def __init__(self, num_state_space, num_action_space):
@@ -13,9 +15,9 @@ class DiscreteStateDQN(nn.Module):
             num_action_space: number of discrete actions
         """
         super(DiscreteStateDQN, self).__init__()
-        self.fc1 = nn.Linear(num_state_space, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, num_action_space)
+        self.fc1 = nn.Linear(num_state_space, HIDDEN_LAYER_1)
+        self.fc2 = nn.Linear(HIDDEN_LAYER_1, HIDDEN_LAYER_2)
+        self.fc3 = nn.Linear(HIDDEN_LAYER_2, num_action_space)
 
     def forward(self, states):
         """network forward function

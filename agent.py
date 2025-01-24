@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-
 BATCH_SIZE = 64         # minibatch size
 LR = 1e-5               # learning rate
 UPDATE_EVERY = 4        # how often to update the network
@@ -18,8 +17,6 @@ elif torch.cuda.is_available():
     device = torch.device("cuda:0")
 else:
     device = torch.device("cpu")
-
-print("device", device)
 
 # Agent to train a deep Q-network with discrete state input
 class DiscreteStateAgent():
@@ -52,11 +49,11 @@ class DiscreteStateAgent():
 
         Params
         ======
-            state: number of discrete state
-            action: number of discrete action
-            reward: 
-            next_state:
-            done:
+            state (array_like): the current state
+            action (array_like): the current action taken
+            reward (array_like): the reward after taking the current action
+            next_state (array_like): the next state after taking action
+            done (array_like): whether the episode is finished
         """
         # Update the memory with the latest experience, and perform learn step
         self.memory.add(state, action, reward, next_state, done)
@@ -104,11 +101,12 @@ class DiscreteStateAgent():
         states, actions, rewards, next_states, dones = experiences
 
         # compute Q from the target network
+        # "detach" so that the modification to output won't affect the network weight
+        # this returns the action with the highest Q value for each state
         q_target_next_max = self.network_target(next_states).detach().max(1)[0].unsqueeze(1)
         q_targets = rewards + (gamma * q_target_next_max * (1 - dones))
 
-        # compute Q value from updating network
-        # print(actions.long())
+        # compute Q value from active updating network
         q_expected = self.network_local(states).gather(1, actions.long())
 
         # compute loss
@@ -163,5 +161,4 @@ class ReplayBuffer():
 
     def __len__(self):
         return len(self.memory)
-
 
