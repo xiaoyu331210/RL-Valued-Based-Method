@@ -33,9 +33,8 @@ The task is episodic, and in order to solve the environment, the agent must get 
     (_For AWS_) If you'd like to train the agent on AWS (and have not [enabled a virtual screen](https://github.com/Unity-Technologies/ml-agents/blob/master/docs/Training-on-Amazon-Web-Service.md)), then please use [this link](https://s3-us-west-1.amazonaws.com/udacity-drlnd/P1/Banana/Banana_Linux_NoVis.zip) to obtain the environment.
 
 2. Place the file in the root folder of this repository, and unzip the file
+3. Install the required package by runing `pip install -r requirements.txt`
 
-### How to run correctly
+### How to Run
 
-If run python files locally, need to enter env with `source activate drlnd`
-
-If run python notebook, need to setup the env with `python -m ipykernel install --user --name drlnd --display-name "drlnd"`
+The runbook is in `Navigation.ipynb` file. There are 3 code blocks. The first 2 blocks are used to train a new model, while the last block is used to load and test an existing model
