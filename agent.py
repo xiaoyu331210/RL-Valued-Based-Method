@@ -9,7 +9,7 @@ import torch.optim as optim
 
 BATCH_SIZE = 64         # minibatch size
 LR = 1e-5               # learning rate
-UPDATE_EVERY = 4        # how often to update the network
+UPDATE_EVERY = 1        # how often to update the network
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
