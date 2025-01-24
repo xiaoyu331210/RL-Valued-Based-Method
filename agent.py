@@ -10,105 +10,64 @@ import torch.optim as optim
 
 BATCH_SIZE = 64         # minibatch size
 LR = 1e-5               # learning rate
+UPDATE_EVERY = 4        # how often to update the network
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda:0")
+else:
+    device = torch.device("cpu")
 
-class VisualStateAgent():
-    def __init__(self, action_num, gamma):
-        self.action_num = action_num
-        self.gamma = gamma
+print("device", device)
 
-        # create the network
-        self.network_local = model.VisualStateDQN(action_num)
-        self.network_target = model.VisualStateDQN(action_num)
-
-        # Experience replay queue
-        self.memory = ReplayBuffer(int(1e5), BATCH_SIZE)
-
-        self.optimizer = optim.Adam(self.network_local.parameters())
-    
-    def step(self, state, action, reward, next_state, done):
-        # update memory with the current observations
-        self.memory.add(state, action, reward, next_state, done)
-        if len(self.memory) < BATCH_SIZE:
-            return
-        experiences = self.memory.sample()
-        self.__learn(experiences, self.gamma)
-    
-    def act(self, states, eps):
-        # states = torch.from_numpy(states).float().unsqueeze(0).to(device)
-        states = torch.from_numpy(states).float().to(device)
-        self.network_local.eval()
-        with torch.no_grad():
-            action_values = self.network_local(states)
-        self.network_local.train()
-
-        # do spsilon-greedy action selection
-        if random.random() > eps:
-            return np.argmax(action_values.cpu().data.numpy())
-        else:
-            return random.choice(np.arange(self.action_num))
-        
-
-    def __learn(self, experienecs, gamma):
-        # get indivdiual elements from experiences
-        states, actions, rewards, next_states, dones = experienecs
-
-        # get Q value from both target and current network
-        q_target_next_max = self.network_target(next_states).detach().max(1)[0].unsqueeze(1)
-        q_targets = rewards + (gamma * q_target_next_max * (1 - dones))
-
-        q_expected = self.network_local(states).gather(1, actions.long())
-
-        # compute loss
-        loss = F.mse_loss(q_targets, q_expected)
-
-        # optimize
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        # Soft update the target network
-        TAU = 1e-3
-        self.__soft_update(self.network_local, self.network_target, TAU)
-
-
-    def __soft_update(self, local_model, target_model, tau):
-        """Soft update model parameters.
-        θ_target = τ*θ_local + (1 - τ)*θ_target
+# Agent to train a deep Q-network with discrete state input
+class DiscreteStateAgent():
+    def __init__(self, state_num, action_num, gamma):
+        """Constructor
 
         Params
         ======
-            local_model (PyTorch model): weights will be copied from
-            target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter 
+            state_num (int): number of discrete state
+            action_num (int): number of discrete action
+            gamma (float): discount factor
         """
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
-
-
-
-class DiscreteStateAgent():
-    def __init__(self, state_num, action_num, gamma):
         self.state_num = state_num
         self.action_num = action_num
         self.gamma = gamma
 
         # create the network
-        self.network_local = model.DiscreteStateDQN(state_num, action_num)
-        self.network_target = model.DiscreteStateDQN(state_num, action_num)
+        self.network_local = model.DiscreteStateDQN(state_num, action_num).to(device)
+        self.network_target = model.DiscreteStateDQN(state_num, action_num).to(device)
         self.optimizer = optim.Adam(self.network_local.parameters(), lr=LR)
 
         # Experience Replay Queue
         self.memory = ReplayBuffer(int(1e5), BATCH_SIZE)
 
+        # Initialize time step (for updating every UPDATE_EVERY steps)
+        self.t_step = 0
+
     def step(self, state, action, reward, next_state, done):
+        """add one observation tuple into replay buffer, and optimize the model
+
+        Params
+        ======
+            state: number of discrete state
+            action: number of discrete action
+            reward: 
+            next_state:
+            done:
+        """
         # Update the memory with the latest experience, and perform learn step
         self.memory.add(state, action, reward, next_state, done)
         if len(self.memory) < BATCH_SIZE:
-            return
-        experiences = self.memory.sample()
-        self.__learn(experiences, self.gamma)
+            return False
+        self.t_step = (self.t_step + 1) % UPDATE_EVERY
+        if 0 == self.t_step:
+            experiences = self.memory.sample()
+            self.__learn(experiences, self.gamma)
+            return True
+        return False
 
 
     def act(self, states, eps=0.):
@@ -178,7 +137,6 @@ class DiscreteStateAgent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
-
 class ReplayBuffer():
     # To store experience tuples
     def __init__(self, buffer_size, batch_size):
@@ -205,13 +163,5 @@ class ReplayBuffer():
 
     def __len__(self):
         return len(self.memory)
-
-
-
-
-
-
-
-
 
 
