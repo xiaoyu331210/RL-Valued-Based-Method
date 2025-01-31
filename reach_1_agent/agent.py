@@ -2,13 +2,15 @@ import model
 from collections import namedtuple, deque
 import random
 import numpy as np
+import copy
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-BATCH_SIZE = 64         # minibatch size
-LR = 1e-5               # learning rate
+BATCH_SIZE = 128         # minibatch size
+actor_lr = 1e-4
+critic_lr = 1e-4
 UPDATE_EVERY = 1        # how often to update the network
 
 if torch.backends.mps.is_available():
@@ -21,9 +23,10 @@ else:
 print("device", device)
 
 class ReachAgent():
-    def __init__(self, state_num, action_num, discount_factor):
+    def __init__(self, state_num, action_num, agent_num, discount_factor, weight_decay):
         self.action_num = action_num
         self.discount_factor = discount_factor
+        self.agent_num = agent_num
 
         # declare the network
         self.actor = model.Actor(state_num, action_num).to(device)
@@ -32,22 +35,30 @@ class ReachAgent():
         self.critic = model.Critic(state_num, action_num).to(device)
         self.critic_target = model.Critic(state_num, action_num).to(device)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LR)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=weight_decay)
+
+        self.noise = OUNoise(action_num, 2)
 
         # experience replay queue
-        self.memory = ReplayBuffer(int(1e5), BATCH_SIZE)
+        self.memory = ReplayBuffer(int(1e6), BATCH_SIZE)
 
         self.t_step = 0
 
+    def reset(self):
+        self.noise.reset()
+
     def act(self, states):
-        states = torch.from_numpy(states).float().unsqueeze(0).to(device)
+        # states = torch.from_numpy(states).float().unsqueeze(0).to(device)
+        states = torch.from_numpy(states).float().to(device)
         self.actor.eval()
         with torch.no_grad():
-            actions = self.actor(states)
+            actions = self.actor(states).cpu().data.numpy()
         self.actor.train()
 
-        return actions.cpu().data.numpy()
+        # return actions
+        actions += self.noise.sample()
+        return np.clip(actions, -1., 1.)
 
 
     def step(self, state, action, reward, next_state, done):
@@ -62,7 +73,10 @@ class ReachAgent():
             done (array_like): whether the episode is finished
         """
         # Update the memory with the latest experience, and perform learn step
-        self.memory.add(state, action, reward, next_state, done)
+        # self.memory.add(state, action, reward, next_state, done)
+        for i in range(self.agent_num):
+            self.memory.add(state[i,:], action[i,:], reward[i], next_state[i,:], done[i])
+
         if len(self.memory) < BATCH_SIZE:
             return False
         self.t_step = (self.t_step + 1) % UPDATE_EVERY
@@ -141,3 +155,25 @@ class ReplayBuffer():
 
     def __len__(self):
         return len(self.memory)
+
+class OUNoise:
+    """Ornstein-Uhlenbeck process."""
+
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
+        """Initialize parameters and noise process."""
+        self.mu = mu * np.ones(size)
+        self.theta = theta
+        self.sigma = sigma
+        self.seed = random.seed(seed)
+        self.reset()
+
+    def reset(self):
+        """Reset the internal state (= noise) to mean (mu)."""
+        self.state = copy.copy(self.mu)
+
+    def sample(self):
+        """Update internal state and return it as a noise sample."""
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.array([random.random() for i in range(len(x))])
+        self.state = x + dx
+        return self.state
