@@ -15,9 +15,7 @@ class Actor(nn.Module):
     def __init__(self, state_num, action_num):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(state_num, ACTOR_HIDDEN_LAYER_1)
-        self.norm1 = nn.BatchNorm1d(ACTOR_HIDDEN_LAYER_1)
         self.fc2 = nn.Linear(ACTOR_HIDDEN_LAYER_1, ACTOR_HIDDEN_LAYER_2)
-        self.norm2 = nn.BatchNorm1d(ACTOR_HIDDEN_LAYER_2)
         self.fc3 = nn.Linear(ACTOR_HIDDEN_LAYER_2, action_num)
         self.reset_parameters()
 
@@ -40,16 +38,13 @@ class Critic(nn.Module):
     def __init__(self, state_num, action_num):
         super(Critic, self).__init__()
         self.fc1 = nn.Linear(state_num, CRITIC_HIDDEN_LAYER_1)
-        self.norm1 = nn.BatchNorm1d(CRITIC_HIDDEN_LAYER_1)
         self.fc2 = nn.Linear(CRITIC_HIDDEN_LAYER_1 + action_num, CRITIC_HIDDEN_LAYER_2)
-        self.norm2 = nn.BatchNorm1d(CRITIC_HIDDEN_LAYER_2)
         self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
         self.reset_parameters()
 
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        # self.fc3.weight.data.uniform_(3e-4, 3e-4)
         self.fc3.weight.data.uniform_(-3e-3, 3e-3)
 
     def forward(self, state, action):

@@ -3,55 +3,69 @@ from collections import namedtuple, deque
 import random
 import numpy as np
 import copy
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-BATCH_SIZE = 128         # minibatch size
-actor_lr = 1e-4
-critic_lr = 1e-4
-UPDATE_EVERY = 20        # how often to update the network
+@dataclass
+class DDPGConfig:
+    num_state: int = 0
+    num_action: int = 0
+    num_agent: int = 1
+    actor_learning_rate: float = 1e-4
+    critic_learning_rate: float = 1e-4
+    batch_size: int = 128
+    update_every_timestamp: int = 20
+    update_time_each_stamp: int = 10
+    discount_factor: float = 0.99
+    replay_buffer_size: int = 1e6
+    weight_decay: float = 0
 
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda:0")
-else:
-    device = torch.device("cpu")
+class DDPGAgent():
+    def __init__(self, config):
+        self.config = config
 
-print("device", device)
-
-class ReachAgent():
-    def __init__(self, state_num, action_num, agent_num, discount_factor, weight_decay):
-        self.action_num = action_num
-        self.discount_factor = discount_factor
-        self.agent_num = agent_num
-        self.update_time = 10
+        self.device = torch.device("cpu")
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
 
         # declare the network
-        self.actor = model.Actor(state_num, action_num).to(device)
-        self.actor_target = model.Actor(state_num, action_num).to(device)
+        self.actor = model.Actor(config.num_state, config.num_action).to(self.device)
+        self.actor_target = model.Actor(config.num_state, config.num_action).to(self.device)
 
-        self.critic = model.Critic(state_num, action_num).to(device)
-        self.critic_target = model.Critic(state_num, action_num).to(device)
+        self.critic = model.Critic(config.num_state, config.num_action).to(self.device)
+        self.critic_target = model.Critic(config.num_state, config.num_action).to(self.device)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=weight_decay)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=config.actor_learning_rate)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=config.critic_learning_rate, weight_decay=config.weight_decay)
 
-        self.noise = OUNoise((self.agent_num, action_num), 2)
+        self.noise = OUNoise((config.num_agent, config.num_action), 2)
 
         # experience replay queue
-        self.memory = ReplayBuffer(int(1e6), BATCH_SIZE)
+        self.memory = ReplayBuffer(int(config.replay_buffer_size), config.batch_size, self.device)
 
+        # record time steps
         self.t_step = 0
+
+        # model weight file name
+        # self.default_actor_weight_prefix = '/ddpg_actor'
+        # self.default_critic_weight_prefix = '/ddpg_critic'
+        # self.default_actor_target_weight_prefix = '/ddpg_actor_target'
+        # self.default_critic_target_weight_prefix = '/ddpg_critic_target'
+        self.default_actor_weight_prefix = '/reacher_actor_checkpoint_max_t_1000'
+        self.default_critic_weight_prefix = '/reacher_critic_checkpoint_max_t_1000'
+        self.default_actor_target_weight_prefix = '/reacher_actor_target_checkpoint_max_t_1000'
+        self.default_critic_target_weight_prefix = '/reacher_critic_target_checkpoint_max_t_1000'
 
     def reset(self):
         self.noise.reset()
 
     def act(self, states):
-        # states = torch.from_numpy(states).float().unsqueeze(0).to(device)
-        states = torch.from_numpy(states).float().to(device)
+        states = torch.from_numpy(states).float().to(self.device)
         self.actor.eval()
         with torch.no_grad():
             actions = self.actor(states).cpu().data.numpy()
@@ -75,18 +89,19 @@ class ReachAgent():
         """
         # Update the memory with the latest experience, and perform learn step
         # self.memory.add(state, action, reward, next_state, done)
-        for i in range(self.agent_num):
+        for i in range(self.config.num_agent):
             self.memory.add(state[i,:], action[i,:], reward[i], next_state[i,:], done[i])
 
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < self.config.batch_size:
             return False
-        self.t_step = (self.t_step + 1) % UPDATE_EVERY
-        if 0 == self.t_step:
-            for _ in range(self.update_time):
-                experiences = self.memory.sample()
-                self.__learn(experiences, self.discount_factor)
-            return True
-        return False
+        self.t_step = (self.t_step + 1) % self.config.update_every_timestamp
+        if 0 != self.t_step:
+            return False
+
+        for _ in range(self.config.update_time_each_stamp):
+            experiences = self.memory.sample()
+            self.__learn(experiences, self.config.discount_factor)
+        return True
 
     def __learn(self, experiences, discount_factor):
         states, actions, rewards, next_states, dones = experiences
@@ -129,14 +144,26 @@ class ReachAgent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
+    def save_model(self, folder_path, file_appendix = ''):
+        torch.save(self.actor.state_dict(), folder_path + self.default_actor_weight_prefix + file_appendix + '.pth')
+        torch.save(self.actor_target.state_dict(), folder_path + self.default_actor_target_weight_prefix + file_appendix + '.pth')
+        torch.save(self.critic.state_dict(), folder_path + self.default_critic_weight_prefix + file_appendix + '.pth')
+        torch.save(self.critic_target.state_dict(), folder_path + self.default_critic_target_weight_prefix + file_appendix + '.pth')
+
+    def load_model(self, folder_path, file_appendix = ''):
+        self.actor.load_state_dict(torch.load(folder_path + self.default_actor_weight_prefix + file_appendix + '.pth'))
+        self.actor_target.load_state_dict(torch.load(folder_path + self.default_actor_target_weight_prefix + file_appendix + '.pth'))
+        self.critic.load_state_dict(torch.load(folder_path + self.default_critic_weight_prefix + file_appendix + '.pth'))
+        self.critic_target.load_state_dict(torch.load(folder_path + self.default_critic_target_weight_prefix + file_appendix + '.pth'))
 
 
 class ReplayBuffer():
     # To store experience tuples
-    def __init__(self, buffer_size, batch_size):
+    def __init__(self, buffer_size, batch_size, device):
         self.memory = deque(maxlen=buffer_size)
         self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
         self.batch_size = batch_size
+        self.device = device
 
     def add(self, state, action, reward, next_state, done):
         # create a new experience, and add to memory
@@ -147,11 +174,11 @@ class ReplayBuffer():
         # randomly sample batch num of experience
         experiences = random.sample(self.memory, self.batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None])).float().to(device)
+        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
+        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(self.device)
+        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(self.device)
+        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
+        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None])).float().to(self.device)
 
         return (states, actions, rewards, next_states, dones)
 
