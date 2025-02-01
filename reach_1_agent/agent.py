@@ -11,7 +11,7 @@ import torch.optim as optim
 BATCH_SIZE = 128         # minibatch size
 actor_lr = 1e-4
 critic_lr = 1e-4
-UPDATE_EVERY = 1        # how often to update the network
+UPDATE_EVERY = 20        # how often to update the network
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -27,6 +27,7 @@ class ReachAgent():
         self.action_num = action_num
         self.discount_factor = discount_factor
         self.agent_num = agent_num
+        self.update_time = 10
 
         # declare the network
         self.actor = model.Actor(state_num, action_num).to(device)
@@ -38,7 +39,7 @@ class ReachAgent():
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=weight_decay)
 
-        self.noise = OUNoise(action_num, 2)
+        self.noise = OUNoise((self.agent_num, action_num), 2)
 
         # experience replay queue
         self.memory = ReplayBuffer(int(1e6), BATCH_SIZE)
@@ -81,8 +82,9 @@ class ReachAgent():
             return False
         self.t_step = (self.t_step + 1) % UPDATE_EVERY
         if 0 == self.t_step:
-            experiences = self.memory.sample()
-            self.__learn(experiences, self.discount_factor)
+            for _ in range(self.update_time):
+                experiences = self.memory.sample()
+                self.__learn(experiences, self.discount_factor)
             return True
         return False
 
@@ -165,6 +167,7 @@ class OUNoise:
         self.theta = theta
         self.sigma = sigma
         self.seed = random.seed(seed)
+        self.size = size  
         self.reset()
 
     def reset(self):
@@ -174,6 +177,6 @@ class OUNoise:
     def sample(self):
         """Update internal state and return it as a noise sample."""
         x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.array([random.random() for i in range(len(x))])
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.standard_normal(self.size)
         self.state = x + dx
         return self.state
