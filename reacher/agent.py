@@ -52,14 +52,10 @@ class DDPGAgent():
         self.t_step = 0
 
         # model weight file name
-        # self.default_actor_weight_prefix = '/ddpg_actor'
-        # self.default_critic_weight_prefix = '/ddpg_critic'
-        # self.default_actor_target_weight_prefix = '/ddpg_actor_target'
-        # self.default_critic_target_weight_prefix = '/ddpg_critic_target'
-        self.default_actor_weight_prefix = '/reacher_actor_checkpoint_max_t_1000'
-        self.default_critic_weight_prefix = '/reacher_critic_checkpoint_max_t_1000'
-        self.default_actor_target_weight_prefix = '/reacher_actor_target_checkpoint_max_t_1000'
-        self.default_critic_target_weight_prefix = '/reacher_critic_target_checkpoint_max_t_1000'
+        self.default_actor_weight_prefix = '/ddpg_actor'
+        self.default_critic_weight_prefix = '/ddpg_critic'
+        self.default_actor_target_weight_prefix = '/ddpg_actor_target'
+        self.default_critic_target_weight_prefix = '/ddpg_critic_target'
 
     def reset(self):
         self.noise.reset()
