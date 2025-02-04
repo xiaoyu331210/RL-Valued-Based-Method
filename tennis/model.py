@@ -55,8 +55,6 @@ class Critic(nn.Module):
 class MultiAgentCritic(nn.Module):
     def __init__(self, state_num, action_num, agent_num):
         super(MultiAgentCritic, self).__init__()
-        # self.fc1 = nn.Linear((state_num + action_num) * agent_num, CRITIC_HIDDEN_LAYER_1)
-        # self.fc2 = nn.Linear(CRITIC_HIDDEN_LAYER_1, CRITIC_HIDDEN_LAYER_2)
         self.fc1 = nn.Linear(state_num * agent_num, CRITIC_HIDDEN_LAYER_1)
         self.fc2 = nn.Linear(action_num * agent_num + CRITIC_HIDDEN_LAYER_1, CRITIC_HIDDEN_LAYER_2)
         self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
@@ -68,8 +66,25 @@ class MultiAgentCritic(nn.Module):
         self.fc3.weight.data.uniform_(-3e-3, 3e-3)
     
     def forward(self, state, action):
-        # x = F.relu(self.fc1(torch.cat((state, action), dim=1)))
-        # x = F.relu(self.fc2(x))
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(torch.cat((x, action), dim=1)))
+        return self.fc3(x)
+
+
+class MAPPOCritic(nn.Module):
+    def __init__(self, state_num, agent_num):
+        super(MAPPOCritic, self).__init__()
+        self.fc1 = nn.Linear(state_num * agent_num, CRITIC_HIDDEN_LAYER_1)
+        self.fc2 = nn.Linear(CRITIC_HIDDEN_LAYER_1, CRITIC_HIDDEN_LAYER_2)
+        self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
+        self.reset_parameters()
+    
+    def reset_parameters(self):
+        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
+        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
+        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
+    
+    def forward(self, all_states):
+        x = F.relu(self.fc1(all_states))
+        x = F.relu(self.fc2(x))
         return self.fc3(x)
