@@ -86,7 +86,7 @@ As shown in **Figure 3 and Figure 4**, MADDPG demonstrated **significant improve
 ## **4. MAPPO Implementation and Final Results**  
 Finally, I tested **Multi-Agent Proximal Policy Optimization (MAPPO)**, an **on-policy** reinforcement learning algorithm. Unlike DDPG and MADDPG, which are **off-policy**, MAPPO has **lower sample efficiency** but is generally **more stable** due to its **clipped policy updates**.
 
-In the **initial MAPPO experiment**, the network achieved **high rewards**, but training exhibited **increased fluctuations** once performance improved. As shown in **Figures 5, 6, and 7**, the training curve became **unstable at high rewards**, likely due to **over-aggressive learning steps and excessive exploration**.
+In the **initial MAPPO experiment**, the network achieved **high rewards**, but training exhibited **increased fluctuations** once performance improved. As shown in **Figures 5**, the training curve became **unstable at high rewards**, likely due to **over-aggressive learning steps and excessive exploration**.
 
 ### **Training Performance of MAPPO (Before Hyperparameter Tuning)**  
 
