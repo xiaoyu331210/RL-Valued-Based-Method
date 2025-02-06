@@ -12,11 +12,11 @@ ACTOR_HIDDEN_LAYER_1 = 256
 ACTOR_HIDDEN_LAYER_2 = 128
 class Actor(nn.Module):
     """Some Information about MyModule"""
-    def __init__(self, state_num, action_num):
+    def __init__(self, state_num, action_num, hidden_layer_1=ACTOR_HIDDEN_LAYER_1, hidden_layer_2=ACTOR_HIDDEN_LAYER_2):
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_num, ACTOR_HIDDEN_LAYER_1)
-        self.fc2 = nn.Linear(ACTOR_HIDDEN_LAYER_1, ACTOR_HIDDEN_LAYER_2)
-        self.fc3 = nn.Linear(ACTOR_HIDDEN_LAYER_2, action_num)
+        self.fc1 = nn.Linear(state_num, hidden_layer_1)
+        self.fc2 = nn.Linear(hidden_layer_1, hidden_layer_2)
+        self.fc3 = nn.Linear(hidden_layer_2, action_num)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -35,11 +35,11 @@ CRITIC_HIDDEN_LAYER_1 = 256
 CRITIC_HIDDEN_LAYER_2 = 128
 class Critic(nn.Module):
     """Some Information about Critic"""
-    def __init__(self, state_num, action_num):
+    def __init__(self, state_num, action_num, hidden_layer_1=CRITIC_HIDDEN_LAYER_1, hidden_layer_2=CRITIC_HIDDEN_LAYER_2):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_num, CRITIC_HIDDEN_LAYER_1)
-        self.fc2 = nn.Linear(CRITIC_HIDDEN_LAYER_1 + action_num, CRITIC_HIDDEN_LAYER_2)
-        self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
+        self.fc1 = nn.Linear(state_num, hidden_layer_1)
+        self.fc2 = nn.Linear(hidden_layer_1 + action_num, hidden_layer_2)
+        self.fc3 = nn.Linear(hidden_layer_2, 1)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -52,12 +52,12 @@ class Critic(nn.Module):
         x = F.relu(self.fc2(torch.cat((x, action), dim=1)))
         return self.fc3(x)
 
-class MultiAgentCritic(nn.Module):
-    def __init__(self, state_num, action_num, agent_num):
-        super(MultiAgentCritic, self).__init__()
-        self.fc1 = nn.Linear(state_num * agent_num, CRITIC_HIDDEN_LAYER_1)
-        self.fc2 = nn.Linear(action_num * agent_num + CRITIC_HIDDEN_LAYER_1, CRITIC_HIDDEN_LAYER_2)
-        self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
+class MADDPGCritic(nn.Module):
+    def __init__(self, state_num, action_num, agent_num, hidden_layer_1=CRITIC_HIDDEN_LAYER_1, hidden_layer_2=CRITIC_HIDDEN_LAYER_2):
+        super(MADDPGCritic, self).__init__()
+        self.fc1 = nn.Linear(state_num * agent_num, hidden_layer_1)
+        self.fc2 = nn.Linear(action_num * agent_num + hidden_layer_1, hidden_layer_2)
+        self.fc3 = nn.Linear(hidden_layer_2, 1)
         self.reset_parameters()
     
     def reset_parameters(self):
@@ -71,20 +71,37 @@ class MultiAgentCritic(nn.Module):
         return self.fc3(x)
 
 
+# Actor Network
+class MAPPOActor(nn.Module):
+    def __init__(self, obs_dim, act_dim, hidden_size=256):
+        super(MAPPOActor, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
+        )
+        self.mu = nn.Linear(hidden_size, act_dim)
+        self.log_std = nn.Parameter(torch.zeros(act_dim))
+        
+    def forward(self, x):
+        x = self.net(x)
+        mu = torch.tanh(self.mu(x))
+        std = torch.exp(self.log_std).expand_as(mu)
+        return mu, std
+
+# Centralized Critic Network
 class MAPPOCritic(nn.Module):
-    def __init__(self, state_num, agent_num):
+    def __init__(self, state_dim, hidden_size=256):
         super(MAPPOCritic, self).__init__()
-        self.fc1 = nn.Linear(state_num * agent_num, CRITIC_HIDDEN_LAYER_1)
-        self.fc2 = nn.Linear(CRITIC_HIDDEN_LAYER_1, CRITIC_HIDDEN_LAYER_2)
-        self.fc3 = nn.Linear(CRITIC_HIDDEN_LAYER_2, 1)
-        self.reset_parameters()
-    
-    def reset_parameters(self):
-        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
-        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
-    
-    def forward(self, all_states):
-        x = F.relu(self.fc1(all_states))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+        
+    def forward(self, x):
+        return self.net(x)
+

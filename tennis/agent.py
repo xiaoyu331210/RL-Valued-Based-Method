@@ -2,10 +2,13 @@ import model
 from utils import OUNoise, ReplayBufferMultiAgent, ReplayBuffer, ReplayBufferMAPPO, soft_update
 import numpy as np
 from dataclasses import dataclass
+from torch.utils.data import TensorDataset, DataLoader
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import os
 
 @dataclass
 class DDPGConfig:
@@ -136,20 +139,19 @@ class DDPGAgent():
         self.critic.load_state_dict(torch.load(folder_path + self.default_critic_weight_prefix + file_appendix + '.pth'))
         self.critic_target.load_state_dict(torch.load(folder_path + self.default_critic_target_weight_prefix + file_appendix + '.pth'))
 
-
-@dataclass
-class MultiAgentDDPGConfig:
-    num_state: int = 0
-    num_action: int = 0
-    num_agent: int = 1
-    actor_learning_rate: float = 1e-4
-    critic_learning_rate: float = 1e-4
-    batch_size: int = 128
-    update_every_timestamp: int = 20
-    update_time_each_stamp: int = 10
-    discount_factor: float = 0.99
-    replay_buffer_size: int = 1e6
-    weight_decay: float = 0
+# @dataclass
+# class MultiAgentDDPGConfig:
+#     num_state: int = 0
+#     num_action: int = 0
+#     num_agent: int = 1
+#     actor_learning_rate: float = 1e-4
+#     critic_learning_rate: float = 1e-4
+#     batch_size: int = 128
+#     update_every_timestamp: int = 20
+#     update_time_each_stamp: int = 10
+#     discount_factor: float = 0.99
+#     replay_buffer_size: int = 1e6
+#     weight_decay: float = 0
 
 class MultiAgentDDPG():
     def __init__(self, config):
@@ -169,8 +171,8 @@ class MultiAgentDDPG():
             target_actor.load_state_dict(actor.state_dict())
         self.actor_optimizers = [optim.Adam(actor.parameters(), lr=config.actor_learning_rate) for actor in self.actors]
         
-        self.critics = [model.MultiAgentCritic(config.num_state, config.num_action, config.num_agent).to(self.device) for _ in range(config.num_agent)]
-        self.target_critics = [model.MultiAgentCritic(config.num_state, config.num_action, config.num_agent).to(self.device) for _ in range(config.num_agent)]
+        self.critics = [model.MADDPGCritic(config.num_state, config.num_action, config.num_agent).to(self.device) for _ in range(config.num_agent)]
+        self.target_critics = [model.MADDPGCritic(config.num_state, config.num_action, config.num_agent).to(self.device) for _ in range(config.num_agent)]
         for critic, target_critic in zip(self.critics, self.target_critics):
             # initliaze target with the same parameters as local network
             target_critic.load_state_dict(critic.state_dict())
@@ -315,171 +317,179 @@ class MultiAgentPPOConfig:
     weight_decay: float = 0
     ppo_epochs: int = 10
 
-class MultiAgentPPO():
-    def __init__(self, config):
-        self.config = config
 
-        self.device = torch.device("cpu")
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
-
-        self.actors = [model.Actor(config.num_state, config.num_action).to(self.device) for _ in range(config.num_agent)]
-        self.actor_optimizers = [optim.Adam(actor.parameters(), lr=config.actor_learning_rate) for actor in self.actors]
-
-        self.critic = model.MAPPOCritic(config.num_state, config.num_agent).to(self.device)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=config.critic_learning_rate)
-
-        self.memory = ReplayBufferMAPPO(int(config.replay_buffer_size))
-
-    def act(self, states):
-        """
-        For each agent, select an action based on its current observation.
-        Returns a list of actions and corresponding log probabilities.
-        """
-        actions = []
-        log_probs = []
-        for agent_idx in range(self.config.num_agent):
-            state_tensor = torch.FloatTensor(states[agent_idx]).unsqueeze(0).to(self.device)
-            action_pred = self.actors[agent_idx](state_tensor).squeeze(0) # remove the [batch_size] dimension
-            # sample with a normal distribution
-            dist = torch.distributions.Normal(action_pred, 0.1)
-            sampled_action = dist.sample()
-            log_prob = dist.log_prob(sampled_action)
-            actions.append(np.clip(sampled_action.detach().cpu().numpy(), -1., 1.))
-            log_probs.append(log_prob.detach().cpu().numpy())
-        return np.array(actions), np.array(log_probs)
-
-    def store(self, states, actions, rewards, next_states, dones, log_probs):
-        self.memory.add(states, actions, rewards, next_states, dones, log_probs)
-
-    def compute_advantages(self, rewards, dones, values, next_values):
-        """
-        Compute advantages using Generalized Advantage Estimation (GAE).
-        All inputs are torch tensors.
-        """
-        advantages = torch.zeros_like(rewards)
-        gae = 0
-        # Process in reverse order
-        for t in reversed(range(len(rewards))):
-            delta = rewards[t] + self.config.gamma * next_values[t] * (1 - dones[t]) - values[t]
-            gae = delta + self.config.gamma * self.config.lam * (1 - dones[t]) * gae
-            advantages[t] = gae
-        return advantages
-
-    def learn(self):
-        if len(self.memory) < self.config.batch_size:
-            return None
-
-        torch.autograd.set_detect_anomaly(True)
-        batch = self.memory.sample() # [batch size, num agent, xxx]
-
-        #---------------------- Update Critic ----------------------
-        # For critic, all states are stacked together to form a global state
-        # the output size should be [batch_size, num agent x state dim]
-        state_list = []
-        for state in batch.state:
-            # state has size [num agent, state dim]
-            state_list.append(state.reshape(1, -1))
-        state_list = np.array(state_list).squeeze(1)
-        all_states = torch.FloatTensor(state_list).to(self.device)
-
-        # the output size should be [batch_size, num agent x state dim]
-        next_state_list = []
-        for next_state in batch.next_state:
-            next_state_list.append(next_state.reshape(1, -1))
-        next_state_list = np.array(next_state_list).squeeze(1)
-        all_next_states = torch.FloatTensor(next_state_list).to(self.device)
-
-        all_rewards = torch.FloatTensor(np.array(batch.reward)).to(self.device).squeeze(-1)
-        all_dones = torch.FloatTensor(np.array(batch.done)).to(self.device).squeeze(-1)
-
-        # Compute state-value from critic
-        state_values = self.critic(all_states)
-        next_state_values = self.critic(all_next_states)
-
-        # prepare for computing advantage
-        avg_rewards = all_rewards.mean(dim=1, keepdim=True)
-        avg_dones = all_dones.mean(dim=1, keepdim=True)
-
-        # Compute targets for the critic.
-        targets = avg_rewards + self.config.gamma * next_state_values * (1 - avg_dones)
-        # Compute advantages using GAE (using averaged rewards)
-        advantages = self.compute_advantages(avg_rewards, avg_dones, state_values, next_state_values).detach()    
-
-        # Normalize advantages for stability.
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-        # Update the critic.
-        critic_loss = F.mse_loss(state_values, targets.detach())
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
+# MAPPO Agent
+class MAPPO:
+    def __init__(self, obs_dim, act_dim, state_dim, num_agents,
+                 gamma=0.99, clip_param=0.2, ppo_epochs=10, lr=3e-4,
+                 batch_size=64, gae_lambda=0.95, entropy_coef=0.01):
         
-        #---------------------- Update Actors ----------------------
-        actor_losses = []
-        for _ in range(self.config.ppo_epochs):
-            for agent_idx, actor in enumerate(self.actors):
-                # batch.state has size [batch size, num agent, state dim]
-                # get states/data for current agent
-                curr_agent_states = np.array([state[agent_idx, :] for state in batch.state])
-                state_tensor = torch.FloatTensor(curr_agent_states).to(self.device)
-                curr_agent_actions = np.array([action[agent_idx, :] for action in batch.action])
-                action_tensor = torch.FloatTensor(curr_agent_actions).to(self.device)
-                curr_agent_log_probs = np.array([log_prob[agent_idx, :] for log_prob in batch.log_prob])
-                old_log_probs_tensor = torch.FloatTensor(curr_agent_log_probs).to(self.device)
-                
-                # Recompute log probabilities with the current policy.
-                dist = torch.distributions.Normal(actor(state_tensor), 0.1)
-                new_log_probs = dist.log_prob(action_tensor)
-                # Sum log probabilities along the action dimension if needed.
-                new_log_probs = new_log_probs.sum(dim=-1, keepdim=True)
-                old_log_probs_tensor = old_log_probs_tensor.sum(dim=-1, keepdim=True)
-                
-                # Compute the probability ratio.
-                ratio = torch.exp(new_log_probs - old_log_probs_tensor)
-                
-                surr1 = ratio * advantages
-                surr2 = torch.clamp(ratio, 1 - self.config.clip_eps, 1 + self.config.clip_eps) * advantages
-                actor_loss = -torch.min(surr1, surr2).mean() + self.config.entropy_coef * new_log_probs.mean()
-                self.actor_optimizers[agent_idx].zero_grad()
-                actor_loss.backward()
-                self.actor_optimizers[agent_idx].step()
-                actor_losses.append(actor_loss.item())
+        self.actors = nn.ModuleList([model.MAPPOActor(obs_dim, act_dim) for _ in range(num_agents)])
+        self.critic = model.MAPPOCritic(state_dim)
+        self.optimizer = optim.Adam([
+            {'params': self.actors.parameters()},
+            {'params': self.critic.parameters()}
+        ], lr=lr)
+        
+        self.gamma = gamma
+        self.clip_param = clip_param
+        self.ppo_epochs = ppo_epochs
+        self.batch_size = batch_size
+        self.gae_lambda = gae_lambda
+        self.entropy_coef = entropy_coef
+        self.num_agents = num_agents
+        self.act_dim = act_dim
+        self.lr = lr
+        # Add model directory parameter
+        self.model_dir = "models/"
+        os.makedirs(self.model_dir, exist_ok=True)
 
-        # Clear the replay buffer after updating.
-        self.memory.clear()
-        return critic_loss.item(), np.mean(actor_losses)
+    def act(self, obs, agent_idx):
+        with torch.no_grad():
+            obs_tensor = torch.FloatTensor(obs)
+            mu, std = self.actors[agent_idx](obs_tensor)
+            dist = torch.distributions.Normal(mu, std)
+            action = dist.sample()
+            action = np.clip(action, -1., 1.)
+            log_prob = dist.log_prob(action).sum(-1)
+        return action.numpy(), log_prob.numpy()
 
-# # test
-# memory = ReplayBufferMAPPO(10)
-# states = np.zeros((2, 22))
-# actions = np.zeros((2, 2))
-# next_states = np.zeros((2, 22))
-# rewards = np.zeros((2, 1))
-# dones = np.zeros((2, 1))
-# log_probs = np.zeros((2, 1))
-# for _ in range(10):
-#     memory.add(states, actions, rewards, next_states, dones, log_probs)
-# batch = memory.sample()
-# print(len(batch.state))
-# print(batch.state[0].shape)
+    def update(self, buffer, curr_episode, max_episode):
+        # Convert buffer to tensors
+        states = torch.FloatTensor(np.array(buffer.global_states))
+        next_states = torch.FloatTensor(np.array(buffer.next_global_states))
+        individual_obs = torch.FloatTensor(np.array(buffer.individual_obs))
+        actions = torch.FloatTensor(np.array(buffer.actions))
+        rewards = torch.FloatTensor(np.array(buffer.rewards))
+        dones = torch.FloatTensor(np.array(buffer.dones))
+        old_log_probs = torch.FloatTensor(np.array(buffer.log_probs))
+        agent_indices = torch.LongTensor(np.array(buffer.agent_indices))
 
-# config = MultiAgentPPOConfig(
-#     num_state = 22,
-#     num_action = 2,
-#     num_agent = 2,
-#     actor_learning_rate=1e-4,
-#     critic_learning_rate=1e-4,
-#     batch_size=5,
-#     clip_eps=1,
-#     entropy_coef=0.1,
-#     replay_buffer_size=1e6,
-#     weight_decay=0)
-# agent = MultiAgentPPO(config)
-# for _ in range(10):
-#     agent.store(states, actions, rewards, next_states, dones, log_probs)
-# print(len(agent.memory))
-# agent.learn()
+        # Calculate advantages using GAE
+        with torch.no_grad():
+            values = self.critic(states).squeeze()
+            next_values = self.critic(next_states).squeeze()
+            
+            advantages = torch.zeros_like(rewards)
+            last_advantage = 0
+            for t in reversed(range(len(rewards))):
+                mask = 1.0 - dones[t]
+                delta = rewards[t] + self.gamma * next_values[t] * mask - values[t]
+                advantages[t] = delta + self.gamma * self.gae_lambda * mask * last_advantage
+                last_advantage = advantages[t]
+            returns = advantages + values
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
+        # Create dataset
+        dataset = TensorDataset(individual_obs, actions, old_log_probs, 
+                               advantages, returns, states, agent_indices)
+        dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+        
+        # PPO update
+        # the 1st 10k episodes do not decay
+        decay_delay = 15000.
+        learn_decay_ratio = max(0., curr_episode - decay_delay) / max_episode
+        curr_clip_eps = self.clip_param #max(0.1, self.clip_param * (1. - learn_decay_ratio))
+        curr_entropy_coef = self.entropy_coef # max(0.01, self.entropy_coef * (1. - learn_decay_ratio))
+        curr_epochs = int(max(3, int(self.ppo_epochs * (1. - learn_decay_ratio))))
+        final_lr = 1e-5  # More stability later
+        self.optimizer.param_groups[0]["lr"] = max(final_lr, self.lr * (1. - learn_decay_ratio))
+        for _ in range(curr_epochs):
+            for batch in dataloader:
+                ind_obs_b, actions_b, old_log_probs_b, adv_b, ret_b, states_b, agent_idx_b = batch
+                
+                policy_losses = []
+                entropy_losses = []
+                
+                # Update each agent's policy
+                for agent_id in range(self.num_agents):
+                    mask = agent_idx_b == agent_id
+                    if mask.sum() == 0:
+                        continue
+                    
+                    # Agent-specific data
+                    agent_obs = ind_obs_b[mask]
+                    agent_actions = actions_b[mask]
+                    agent_old_log_probs = old_log_probs_b[mask]
+                    agent_adv = adv_b[mask]
+                    
+                    # Calculate new policy
+                    mu, std = self.actors[agent_id](agent_obs)
+                    dist = torch.distributions.Normal(mu, std)
+                    new_log_probs = dist.log_prob(agent_actions).sum(-1)
+                    entropy = dist.entropy().mean()
+                    
+                    # Policy loss
+                    ratio = (new_log_probs - agent_old_log_probs).exp()
+                    surr1 = ratio * agent_adv
+                    surr2 = torch.clamp(ratio, 1.0 - curr_clip_eps, 
+                                      1.0 + curr_clip_eps) * agent_adv
+                    policy_loss = -torch.min(surr1, surr2).mean()
+                    
+                    policy_losses.append(policy_loss)
+                    entropy_losses.append(entropy)
+
+                # Combine losses
+                policy_loss = torch.stack(policy_losses).mean() if policy_losses else 0.0
+                entropy_loss = torch.stack(entropy_losses).mean() if entropy_losses else 0.0
+                
+                # Value loss
+                values_pred = self.critic(states_b).squeeze()
+                value_loss = F.mse_loss(values_pred, ret_b)
+                
+                # Total loss
+                total_loss = policy_loss + value_loss - curr_entropy_coef * entropy_loss
+                
+                # Optimize
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.actors.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+                self.optimizer.step()
+        
+        buffer.clear()
+
+    def save(self, episode=None, save_optimizer=True):
+        """Save model checkpoints"""
+        checkpoint = {
+            # Save all actors' state dicts
+            'actors': [actor.state_dict() for actor in self.actors],
+            'critic': self.critic.state_dict(),
+            'optimizer': self.optimizer.state_dict() if save_optimizer else None,
+            'num_agents': self.num_agents,  # Critical for verification
+            'episode': episode
+        }
+        
+        filename = f"mappo_checkpoint"
+        if episode is not None:
+            filename += f"_ep{episode}"
+        filename += ".pth"
+        
+        torch.save(checkpoint, os.path.join(self.model_dir, filename))
+        print(f"Saved checkpoint to {filename}")
+
+    def load(self, path, load_optimizer=True):
+        """Load model checkpoints"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No checkpoint found at {path}")
+            
+        checkpoint = torch.load(path)
+
+        # Verify compatibility
+        if checkpoint['num_agents'] != self.num_agents:
+            raise ValueError(f"Checkpoint has {checkpoint['num_agents']} agents, "
+                             f"but current setup has {self.num_agents}")
+        
+        # Load each actor individually
+        for i, actor in enumerate(self.actors):
+            actor.load_state_dict(checkpoint['actors'][i])
+        
+        # Load optimizer if requested
+        if load_optimizer and checkpoint['optimizer'] is not None:
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            
+        print(f"Loaded checkpoint from {path}")
+        return checkpoint.get('episode', 0)
 

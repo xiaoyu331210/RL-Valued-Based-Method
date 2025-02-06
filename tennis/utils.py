@@ -62,25 +62,38 @@ class ReplayBufferMultiAgent():
     def __len__(self):
         return len(self.memory)
 
-# On-policy collection
-Experience2 = namedtuple("Experience2", field_names=["state", "action", "reward", "next_state", "done", "log_prob"])
+# Experience Replay Buffer
 class ReplayBufferMAPPO():
-    def __init__(self, buffer_size):
-        self.memory = deque(maxlen=buffer_size)
-    
-    def add(self, state, action, reward, next_state, done, log_prob):
-        # Each element is a tuple containing joint info for all agents.
-        e = Experience2(state, action, reward, next_state, done, log_prob)
-        self.memory.append(e)
-    
-    def sample(self):
-        return Experience2(*zip(*self.memory))
-    
-    def __len__(self):
-        return len(self.memory)
-
+    def __init__(self):
+        self.global_states = []
+        self.individual_obs = []
+        self.actions = []
+        self.rewards = []
+        self.next_global_states = []
+        self.dones = []
+        self.log_probs = []
+        self.agent_indices = []
+        
+    def add(self, global_state, individual_obs, action, reward, 
+            next_global_state, done, log_prob, agent_idx):
+        self.global_states.append(global_state)
+        self.individual_obs.append(individual_obs)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.next_global_states.append(next_global_state)
+        self.dones.append(done)
+        self.log_probs.append(log_prob)
+        self.agent_indices.append(agent_idx)
+        
     def clear(self):
-        self.memory.clear()
+        self.global_states = []
+        self.individual_obs = []
+        self.actions = []
+        self.rewards = []
+        self.next_global_states = []
+        self.dones = []
+        self.log_probs = []
+        self.agent_indices = []
 
 class OUNoise:
     """Ornstein-Uhlenbeck process."""
