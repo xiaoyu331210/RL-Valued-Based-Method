@@ -16,11 +16,11 @@ I initially implemented **DDPG**, a model-free, off-policy actor-critic method d
 However, as shown in **Figure 1 and Figure 2**, training **exhibited frequent performance dips**, and the network **often took a long time to recover** from these fluctuations. This suggests that DDPG, while capable of solving the task, **struggles with stability**.
 
 ### **Training Performance of DDPG**  
-<img src="images/ddpg-1.png" alt="Description" width="300" height="200">
+<img src="images/ddpg-1.png" alt="Description" width="400" height="200">
 
 📌 **Figure 1: DDPG Training Progress (First Trial)**  
 
-<img src="images/ddpg-2.png" alt="Description" width="300" height="200">
+<img src="images/ddpg-2.png" alt="Description" width="400" height="200">
 
 📌 **Figure 2: DDPG Training Progress (Second Trial)**  
 
@@ -31,6 +31,7 @@ However, as shown in **Figure 1 and Figure 2**, training **exhibited frequent pe
 | Steps to Update       | 20    |
 | Number of Update Each Time       | 20    |
 | Discount Factor       | 0.99    |
+| Replay Buffer Size       | 1e6    |
 | Hidden Layers         | 2     |
 | Hidden Layer 1 Size   | 256     |
 | Hidden Layers 2 Size  | 128     |
@@ -46,10 +47,39 @@ To address DDPG’s instability, I implemented **MADDPG**, which extends DDPG to
 As shown in **Figure 3 and Figure 4**, MADDPG demonstrated **significant improvements in stability compared to DDPG**. While **some fluctuations remained**, the network **recovered faster from performance dips**. This suggests that **sharing global knowledge across agents during training helps stabilize learning**, making MADDPG a more effective solution for multi-agent reinforcement learning.
 
 ### **Training Performance of MADDPG**  
+<img src="images/maddpg-param-1.png" alt="Description" width="400" height="200">
+
 📌 **Figure 3: MADDPG Training Progress (First Trial)**  
+
+| Parameter             | Value |
+|-----------------------|-------|
+| Learning Rate         | 1e-4   |
+| Batch Size            | 512   |
+| Steps to Update       | 10    |
+| Number of Update Each Time       | 10    |
+| Discount Factor       | 0.99    |
+| Replay Buffer Size       | 1e6    |
+| Hidden Layers         | 2     |
+| Hidden Layer 1 Size   | 256     |
+| Hidden Layers 2 Size  | 128     |
+| Activation             | ReLU  |
+
+<img src="images/maddpg-param-2.png" alt="Description" width="400" height="200">
+
 📌 **Figure 4: MADDPG Training Progress (Second Trial)**  
 
-*(Place Figures 3 and 4 here showing MADDPG reward curves.)*
+| Parameter             | Value |
+|-----------------------|-------|
+| Learning Rate         | 1e-4   |
+| Batch Size            | 256   |
+| Steps to Update       | 20    |
+| Number of Update Each Time       | 20    |
+| Discount Factor       | 0.99    |
+| Replay Buffer Size       | 1e6    |
+| Hidden Layers         | 2     |
+| Hidden Layer 1 Size   | 256     |
+| Hidden Layers 2 Size  | 128     |
+| Activation             | ReLU  |
 
 ---
 
@@ -59,25 +89,43 @@ Finally, I tested **Multi-Agent Proximal Policy Optimization (MAPPO)**, an **on-
 In the **initial MAPPO experiment**, the network achieved **high rewards**, but training exhibited **increased fluctuations** once performance improved. As shown in **Figures 5, 6, and 7**, the training curve became **unstable at high rewards**, likely due to **over-aggressive learning steps and excessive exploration**.
 
 ### **Training Performance of MAPPO (Before Hyperparameter Tuning)**  
-📌 **Figure 5: MAPPO Initial Training Progress**  
-📌 **Figure 6: MAPPO Training Instability at High Rewards**  
-📌 **Figure 7: MAPPO Reward Fluctuations During Late Training**  
 
-*(Place Figures 5, 6, and 7 here showing MAPPO performance before tuning.)*
+
+<img src="images/mappo-param-1.png" alt="Description" width="400" height="200">
+
+📌 **Figure 5: MAPPO Initial Training Progress with Reward Fluctutations During Late Training**  
+
+| Parameter             | Value |
+|-----------------------|-------|
+| Learning Rate         | 1e-4   |
+| Batch Size            | 256   |
+| PPO Echos       | 10    |
+| Discount Factor       | 0.99    |
+| Hidden Layers         | 2     |
+| Hidden Layer 1 Size   | 256     |
+| Hidden Layers 2 Size  | 256     |
+| Activation             | ReLU  |
+
+
 
 To address this issue, I conducted **additional experiments** where I:
 - **Gradually reduced the learning rate**.
 - **Adjusted entropy regularization dynamically**.
 - **Increased PPO epochs for more stable updates**.
 
-After these changes, **MAPPO became significantly more stable**, as seen in **Figures 8, 9, and 10**. While this tuning **slightly slowed down training**, the overall performance was **much more reliable** than in the initial trials.
+After these changes, **MAPPO became significantly more stable**, as seen in **Figures 6**. While this tuning **slightly slowed down training**, the overall performance was **much more reliable** than in the initial trials.
 
 ### **Training Performance of MAPPO (After Hyperparameter Tuning)**  
-📌 **Figure 8: MAPPO Training with Reduced Learning Rate**  
-📌 **Figure 9: MAPPO Training with Adjusted Entropy Coefficient**  
-📌 **Figure 10: Final MAPPO Training Performance (Stable Learning Curve)**  
+<img src="images/mappo-param-6.png" alt="Description" width="400" height="200">
 
-*(Place Figures 8, 9, and 10 here showing MAPPO stability after tuning.)*
+📌 **Figure 6: Final: MAPPO Training with Reduced Learning Rate and PPO Epochs**  
+
+
+I coutinued training for another 25000 episodes. There are some fluctuation, but overall, the agent is able to maintain high reward without degradation
+
+<img src="images/mappo-param-7.png" alt="Description" width="400" height="200">
+
+📌 **Figure 7: Additional 25000 Episode Training**  
 
 ---
 
@@ -97,9 +145,3 @@ To further improve performance, future work could explore:
 - **Adaptive learning rate schedules** to dynamically adjust learning rates based on training progress.
 - **Alternative MARL algorithms** such as **QMIX, ATT-MADDPG, or HAPPO** to compare their performance on the Unity Tennis environment.
 
----
-
-### **Final Notes**  
-This version enhances **clarity, structure, and professionalism** while maintaining all key insights from your original draft. You can now **insert the plots** in the placeholders where specified.
-
-*(End of Report)*
